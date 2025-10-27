@@ -19,8 +19,15 @@ STATE_JSON = DATA_DIR / "state.json"
 
 # Opcional: fuentes remotas (para Streamlit Cloud u otros despliegues)
 # Configúralas en .streamlit/secrets.toml
-METRICS_BASE_URL: Optional[str] = st.secrets.get("METRICS_BASE_URL") if hasattr(st, "secrets") else None
-PRICE_CSV_URL: Optional[str] = st.secrets.get("PRICE_CSV_URL") if hasattr(st, "secrets") else None
+# Manejo seguro cuando no existe secrets.toml: no romper, usar None.
+try:
+    METRICS_BASE_URL: Optional[str] = st.secrets.get("METRICS_BASE_URL")  # type: ignore[attr-defined]
+except Exception:
+    METRICS_BASE_URL = None
+try:
+    PRICE_CSV_URL: Optional[str] = st.secrets.get("PRICE_CSV_URL")  # type: ignore[attr-defined]
+except Exception:
+    PRICE_CSV_URL = None
 
 
 def _read_csv_local_or_url(local_path: Path, url: Optional[str]) -> pd.DataFrame:
