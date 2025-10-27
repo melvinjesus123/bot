@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Optional
 
 import pandas as pd
 import streamlit as st
@@ -16,14 +17,39 @@ TRADES_CSV = METRICS_DIR / "trades.csv"
 EQUITY_CSV = METRICS_DIR / "equity.csv"
 STATE_JSON = DATA_DIR / "state.json"
 
+# Opcional: fuentes remotas (para Streamlit Cloud u otros despliegues)
+# Configúralas en .streamlit/secrets.toml
+METRICS_BASE_URL: Optional[str] = st.secrets.get("METRICS_BASE_URL") if hasattr(st, "secrets") else None
+PRICE_CSV_URL: Optional[str] = st.secrets.get("PRICE_CSV_URL") if hasattr(st, "secrets") else None
+
+
+def _read_csv_local_or_url(local_path: Path, url: Optional[str]) -> pd.DataFrame:
+    """Lee un CSV desde URL si está configurada; si falla, intenta local.
+
+    Devuelve DataFrame vacío si no existe local y no hay URL válida.
+    """
+    # Intento remoto
+    if url:
+        try:
+            df = pd.read_csv(url)
+            return df
+        except Exception:
+            pass
+    # Fallback local
+    if local_path.exists():
+        try:
+            return pd.read_csv(local_path)
+        except Exception:
+            return pd.DataFrame()
+    return pd.DataFrame()
+
 
 def load_price_df() -> pd.DataFrame:
     sym = settings.symbol.replace("/", "")
     csv_path = DATA_DIR / f"{sym}_{settings.timeframe}.csv"
-    if not csv_path.exists():
-        return pd.DataFrame()
-    df = pd.read_csv(csv_path)
-    if "datetime" in df.columns:
+    # Si PRICE_CSV_URL está definida, úsala directamente (o podría ser None)
+    df = _read_csv_local_or_url(csv_path, PRICE_CSV_URL)
+    if not df.empty and "datetime" in df.columns:
         df["datetime"] = pd.to_datetime(df["datetime"], utc=True)
         df.set_index("datetime", inplace=True)
     return df
@@ -48,26 +74,40 @@ if source != "Live (en vivo)":
     else:
         st.sidebar.info("No hay simulaciones disponibles todavía.")
 
-def get_metrics_paths():
+def get_metrics_dataframes():
+    """Devuelve (trades_df, equity_df) según la fuente seleccionada.
+
+    - Live: si METRICS_BASE_URL está definida, lee desde URL:
+        {METRICS_BASE_URL}/trades.csv y /equity.csv
+      Si no, intenta local en data/metrics/*
+    - Simulación: lee local desde la carpeta de la ejecución.
+    """
     if source == "Live (en vivo)":
-        return TRADES_CSV, EQUITY_CSV
+        trades_url = f"{METRICS_BASE_URL.rstrip('/')}/trades.csv" if METRICS_BASE_URL else None
+        equity_url = f"{METRICS_BASE_URL.rstrip('/')}/equity.csv" if METRICS_BASE_URL else None
+        tdf = _read_csv_local_or_url(TRADES_CSV, trades_url)
+        edf = _read_csv_local_or_url(EQUITY_CSV, equity_url)
+        return tdf, edf
+
+    # Simulación
     if selected_sim_run:
         base = sim_base / selected_sim_run
-        return base / "trades.csv", base / "equity.csv"
-    return TRADES_CSV, EQUITY_CSV
+        tdf = _read_csv_local_or_url(base / "trades.csv", None)
+        edf = _read_csv_local_or_url(base / "equity.csv", None)
+        return tdf, edf
 
-def compute_kpis(trades_csv: Path, equity_csv: Path):
-    """Calcula KPIs del run actual usando equity y trades.
+    # Fallback
+    tdf = _read_csv_local_or_url(TRADES_CSV, None)
+    edf = _read_csv_local_or_url(EQUITY_CSV, None)
+    return tdf, edf
+
+def compute_kpis_df(tdf: Optional[pd.DataFrame], edf: Optional[pd.DataFrame]):
+    """Calcula KPIs del run actual usando equity y trades DataFrames.
 
     Detecta el inicio del run buscando el último bloque donde la equity
     esté en el rango de un run con capital pequeño (basado en settings.initial_cash).
     """
-    import pandas as pd  # lazy import para evitar coste si no hace falta
-
-    if not equity_csv.exists():
-        return None
-    edf = pd.read_csv(equity_csv)
-    if "timestamp" not in edf.columns or "equity" not in edf.columns or edf.empty:
+    if edf is None or edf.empty or "timestamp" not in edf.columns or "equity" not in edf.columns:
         return None
     edf["timestamp"] = pd.to_datetime(edf["timestamp"], utc=True)
 
@@ -106,43 +146,41 @@ def compute_kpis(trades_csv: Path, equity_csv: Path):
     worst_trade_pct = None
     avg_holding_minutes = None
 
-    if trades_csv.exists():
-        tdf = pd.read_csv(trades_csv)
-        if not tdf.empty and "timestamp" in tdf.columns and "side" in tdf.columns:
-            tdf["timestamp"] = pd.to_datetime(tdf["timestamp"], utc=True)
-            tdf_run = tdf[tdf["timestamp"] >= run_start_ts].copy()
-            total_trades = len(tdf_run)
-            buys = int((tdf_run["side"] == "buy").sum())
-            sells = int((tdf_run["side"] == "sell").sum())
-            exits = int((tdf_run["side"] == "risk-exit").sum())
-            closing = tdf_run[tdf_run["side"].isin(["sell", "risk-exit"])].copy()
-            if not closing.empty:
-                if "pnl_pct" in closing.columns:
-                    closing["pnl_pct"] = pd.to_numeric(closing["pnl_pct"], errors="coerce")
-                    wins = int((closing["pnl_pct"] > 0).sum())
-                    closed_trades = len(closing)
-                    win_rate_pct = (wins / closed_trades * 100.0) if closed_trades else None
-                    if closing["pnl_pct"].notna().any():
-                        avg_pnl_pct = float(closing["pnl_pct"].mean())
-                        best_trade_pct = float(closing["pnl_pct"].max())
-                        worst_trade_pct = float(closing["pnl_pct"].min())
+    if tdf is not None and not tdf.empty and "timestamp" in tdf.columns and "side" in tdf.columns:
+        tdf["timestamp"] = pd.to_datetime(tdf["timestamp"], utc=True)
+        tdf_run = tdf[tdf["timestamp"] >= run_start_ts].copy()
+        total_trades = len(tdf_run)
+        buys = int((tdf_run["side"] == "buy").sum())
+        sells = int((tdf_run["side"] == "sell").sum())
+        exits = int((tdf_run["side"] == "risk-exit").sum())
+        closing = tdf_run[tdf_run["side"].isin(["sell", "risk-exit"])].copy()
+        if not closing.empty:
+            if "pnl_pct" in closing.columns:
+                closing["pnl_pct"] = pd.to_numeric(closing["pnl_pct"], errors="coerce")
+                wins = int((closing["pnl_pct"] > 0).sum())
+                closed_trades = len(closing)
+                win_rate_pct = (wins / closed_trades * 100.0) if closed_trades else None
+                if closing["pnl_pct"].notna().any():
+                    avg_pnl_pct = float(closing["pnl_pct"].mean())
+                    best_trade_pct = float(closing["pnl_pct"].max())
+                    worst_trade_pct = float(closing["pnl_pct"].min())
 
-                # Tiempo de holding: para cada cierre, buscamos el BUY más reciente anterior
-                # Asumimos un modelo simple de posición única (buy -> sell/exit)
-                if not tdf_run.empty:
-                    buy_times = tdf_run[tdf_run["side"] == "buy"]["timestamp"].sort_values().tolist()
-                    if buy_times:
-                        hold_durations = []
-                        for ts_close in closing["timestamp"].sort_values().tolist():
-                            # último buy anterior al cierre
-                            prev_buys = [bt for bt in buy_times if bt <= ts_close]
-                            if prev_buys:
-                                last_buy = prev_buys[-1]
-                                delta = (ts_close - last_buy).total_seconds() / 60.0
-                                if delta >= 0:
-                                    hold_durations.append(delta)
-                        if hold_durations:
-                            avg_holding_minutes = float(sum(hold_durations) / len(hold_durations))
+            # Tiempo de holding: para cada cierre, buscamos el BUY más reciente anterior
+            # Asumimos un modelo simple de posición única (buy -> sell/exit)
+            if not tdf_run.empty:
+                buy_times = tdf_run[tdf_run["side"] == "buy"]["timestamp"].sort_values().tolist()
+                if buy_times:
+                    hold_durations = []
+                    for ts_close in closing["timestamp"].sort_values().tolist():
+                        # último buy anterior al cierre
+                        prev_buys = [bt for bt in buy_times if bt <= ts_close]
+                        if prev_buys:
+                            last_buy = prev_buys[-1]
+                            delta = (ts_close - last_buy).total_seconds() / 60.0
+                            if delta >= 0:
+                                hold_durations.append(delta)
+                    if hold_durations:
+                        avg_holding_minutes = float(sum(hold_durations) / len(hold_durations))
 
     return {
         "initial_equity": initial_equity,
@@ -189,9 +227,9 @@ with col2:
 
     # KPIs del run actual
     st.subheader("KPIs del run actual")
-    t_csv, e_csv = get_metrics_paths()
+    tdf, edf = get_metrics_dataframes()
     try:
-        kpis = compute_kpis(Path(t_csv), Path(e_csv))
+        kpis = compute_kpis_df(tdf, edf)
         if not kpis:
             st.info("Sin KPIs disponibles todavía.")
         else:
@@ -217,9 +255,8 @@ with col1:
     if not price_df.empty and "close" in price_df.columns:
         price_df["close"].plot(ax=ax, color="steelblue", label="Close")
         # Plot trades
-        t_csv, _ = get_metrics_paths()
-        if t_csv.exists():
-            tdf = pd.read_csv(t_csv)
+        tdf, _ = get_metrics_dataframes()
+        if tdf is not None and not tdf.empty:
             try:
                 tdf["timestamp"] = pd.to_datetime(tdf["timestamp"], utc=True)
                 buys = tdf[tdf["side"] == "buy"]
@@ -240,9 +277,9 @@ with col1:
     st.pyplot(fig)
 
     # Tabla de últimas operaciones (10 más recientes)
-    if t_csv.exists():
+    tdf, _ = get_metrics_dataframes()
+    if tdf is not None:
         try:
-            tdf = pd.read_csv(t_csv)
             if not tdf.empty:
                 tdf["timestamp"] = pd.to_datetime(tdf["timestamp"], utc=True)
                 tdf = tdf.sort_values("timestamp", ascending=False)
@@ -275,9 +312,8 @@ with col1:
 
 st.subheader("Equity")
 fig2, ax2 = plt.subplots(figsize=(10, 3))
-_, e_csv = get_metrics_paths()
-if e_csv.exists():
-    edf = pd.read_csv(e_csv)
+_, edf = get_metrics_dataframes()
+if edf is not None and not edf.empty:
     try:
         edf["timestamp"] = pd.to_datetime(edf["timestamp"], utc=True)
         edf.set_index("timestamp", inplace=True)
@@ -295,3 +331,7 @@ st.pyplot(fig2)
 st.caption("Pulsa el botón para actualizar los datos")
 if st.sidebar.button("Actualizar ahora"):
     st.rerun()
+
+# Aviso de fuente
+if source == "Live (en vivo)" and METRICS_BASE_URL:
+    st.caption(f"Leyendo métricas en vivo desde: {METRICS_BASE_URL}")
