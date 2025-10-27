@@ -1,0 +1,6 @@
+[flake8]
+max-line-length = 120
+exclude =
+    src/trader/live_broker.py
+per-file-ignores =
+    src/trader/live_broker.py: F401

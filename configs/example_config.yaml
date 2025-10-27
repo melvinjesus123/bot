@@ -1,0 +1,22 @@
+# Configuración de ejemplo en YAML para el bot de trading
+# Puedes cargar estos valores con tu propio loader o convertirlos a .env
+
+exchange_id: binance
+symbol: BTC/USDT
+timeframe: 1h
+
+# Base de datos
+# Para sqlite local (por defecto):
+db_url: sqlite:///data/market.db
+
+# Gestión de riesgo
+risk:
+  max_position_size: 0.1
+  stop_loss_pct: 0.02
+  take_profit_pct: 0.04
+
+# Modo de operación
+paper_trading: true
+
+# Logging
+log_level: INFO

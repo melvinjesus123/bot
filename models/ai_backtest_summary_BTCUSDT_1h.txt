@@ -1,0 +1,6 @@
+BUY_THR=0.66
+SELL_THR=0.30
+final_return=0.1594
+sharpe=1.5680
+max_drawdown=-0.0323
+trades=113

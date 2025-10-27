@@ -1,0 +1,40 @@
+version: "3.8"
+services:
+  ingest:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    env_file:
+      - ../.env
+    volumes:
+      - ../data:/app/data
+    command: ["python", "-c", "import asyncio; from src.ingest.ccxt_ingest import run_forever; asyncio.run(run_forever())"]
+    restart: unless-stopped
+
+  engine:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    env_file:
+      - ../.env
+    volumes:
+      - ../data:/app/data
+    command: ["python", "src/trader/engine.py"]
+    restart: unless-stopped
+    depends_on:
+      - ingest
+
+  dashboard:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    env_file:
+      - ../.env
+    volumes:
+      - ../data:/app/data
+    command: ["python", "-m", "streamlit", "run", "scripts/streamlit_app.py", "--server.port=8501", "--server.headless=true"]
+    ports:
+      - "8501:8501"
+    restart: unless-stopped
+    depends_on:
+      - engine

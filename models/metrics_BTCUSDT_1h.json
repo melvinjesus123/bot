@@ -1,0 +1,22 @@
+{
+  "symbol": "BTCUSDT",
+  "timeframe": "1h",
+  "features": [
+    "ret_1",
+    "ret_5",
+    "sma_ratio",
+    "ema_fast",
+    "ema_slow",
+    "macd",
+    "macd_signal",
+    "macd_hist",
+    "bb_width",
+    "rsi",
+    "vol_roll",
+    "hl_spread",
+    "atr14"
+  ],
+  "cv_auc": 0.49334316672906364,
+  "thr_recommended": 0.3,
+  "algo": "xgb"
+}

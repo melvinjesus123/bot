@@ -1,0 +1,10 @@
+[server]
+# En Streamlit Cloud no hace falta fijar puerto/host; esto aplica localmente
+headless = true
+
+[theme]
+base = "light"
+primaryColor = "#4B9CD3"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F6F8FA"
+textColor = "#262730"
