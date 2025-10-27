@@ -225,6 +225,47 @@ with col2:
     else:
         st.info("Sin estado persistido aún.")
 
+    # Diagnóstico rápido de fuentes remotas
+    with st.expander("Diagnóstico remoto (Cloud)"):
+        st.caption("Usa esto en Streamlit Cloud para verificar que las URLs remotas sean accesibles.")
+        st.write(f"METRICS_BASE_URL: {METRICS_BASE_URL or 'NO DEFINIDO'}")
+        st.write(f"PRICE_CSV_URL: {PRICE_CSV_URL or 'NO DEFINIDO'}")
+        if st.button("Probar endpoints remotos", type="secondary"):
+            try:
+                results = []
+                if METRICS_BASE_URL:
+                    try:
+                        url_eq = f"{METRICS_BASE_URL.rstrip('/')}/equity.csv"
+                        df_eq = pd.read_csv(url_eq, nrows=5)
+                        results.append(f"equity.csv OK — filas={len(df_eq)}")
+                    except Exception as e:
+                        results.append(f"equity.csv ERROR — {e}")
+                    try:
+                        url_tr = f"{METRICS_BASE_URL.rstrip('/')}/trades.csv"
+                        df_tr = pd.read_csv(url_tr, nrows=5)
+                        results.append(f"trades.csv OK — filas={len(df_tr)}")
+                    except Exception as e:
+                        results.append(f"trades.csv ERROR — {e}")
+                else:
+                    results.append("METRICS_BASE_URL no definido")
+
+                if PRICE_CSV_URL:
+                    try:
+                        df_px = pd.read_csv(PRICE_CSV_URL, nrows=5)
+                        results.append(f"PRICE_CSV_URL OK — filas={len(df_px)}")
+                    except Exception as e:
+                        results.append(f"PRICE_CSV_URL ERROR — {e}")
+                else:
+                    results.append("PRICE_CSV_URL no definido (opcional)")
+
+                for line in results:
+                    if "OK" in line:
+                        st.success(line)
+                    else:
+                        st.error(line)
+            except Exception as e:
+                st.error(f"Fallo en diagnóstico: {e}")
+
     # KPIs del run actual
     st.subheader("KPIs del run actual")
     tdf, edf = get_metrics_dataframes()
